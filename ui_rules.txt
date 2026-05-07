@@ -1,0 +1,42 @@
+1. DESIGN PHILOSOPHY
+Visual: "Timber Inventory" — the UI draws from the visual language of a modern field data app built for professionals who work outdoors: clean, high-contrast, legible in full sunlight, structured like a survey form. The instruments measured living trees — so the palette is rooted in the forest without being decorative about it. Think the design sensibility of a premium outdoor equipment brand's companion app, or a forestry bureau's internal field tool rebuilt with contemporary UX standards. Functional, confident, quietly earthy.
+Mood: fieldwork-ready, grounded, methodical, timber-serious, unhurried.
+Important: No bark textures, no leaf motifs, no green gradients pretending to be a forest canopy. The tools were precise measuring instruments — the app should reflect that precision. Nature informs the palette; it does not decorate the surfaces.
+
+2. COLORS
+#F4F3EF — Main background (survey paper — warm off-white, like a field notebook page)
+#1C1A16 — Primary text & high-contrast elements (heartwood black — warm, deep brown-black)
+#FFFFFF — Secondary panels / card surfaces
+#7A7670 — Secondary text / muted labels (weathered ink, warm grey)
+#3D6B45 — Primary accent (cruiser green — deep forest service green, the color of a USFS uniform collar, a transit case lid, a Abney level housing. Authoritative, not decorative)
+#E8E5DE — Outline / stroke / dividers (field notebook rule lines, warm)
+#9C6B1E — Secondary accent (timber gold — the color of fresh-cut heartwood, brass instrument fittings, and aged steel tape markings. For era tags, material indicators, scale system badges)
+#C0392B — Critical errors only
+Important: Forest green is the single action color — all interactive elements, selected states, primary buttons, active nav indicators. Timber gold is informational only — material, era, scale system, regional origin. They never share an element. The warm-tinted background is critical: this app lives outdoors conceptually, and the warmth of survey paper is what separates it from a cold tech interface.
+
+3. TYPOGRAPHY
+Display / Headings: Sora (weight 600–700) — clean, wide, modern geometric sans with a faint mechanical warmth. Used for tool names on detail views, section headers, and the app title. At large sizes it has the legibility of a field instrument label — clear enough to read at arm's length.
+Body / Descriptions: Inter (weight 300–400) — neutral and invisible at reading sizes. For condition notes, timber region history, and all prose fields.
+Monospace / Identifiers: JetBrains Mono — for archive codes like FCK-LUFKIN-DIAM-TAPE-1938-USA-PACIFIC-NW-017, diameter readings (DBH: 42.6 cm), scale values (Doyle: 180 BF), and all structured technical fields.
+Important: Sora at 20px and above only. Below that, everything is Inter or JetBrains Mono. Mono fields for measurements should feel like they came directly off the instrument's scale — authoritative and exact.
+
+4. SURFACE & TEXTURE LANGUAGE
+
+Backgrounds: flat warm off-white — no grain, no texture, no noise
+Cards: pure white with a 1px border at #E8E5DE and 10px corner radius — field data cards, clean and legible
+Tree cross-section motif: each list card features a small SVG — a minimal circular cross-section of a log showing 3–5 concentric growth rings, rendered in timber gold for display-condition tools and forest green for fully operational instruments. Ring count loosely maps to era depth — more rings for older instruments. This is the unique visual identity of this app within the series.
+Scale system badge: each card shows the log scaling rule in JetBrains Mono — Doyle, Scribner, International, Hoppus — in a small bordered pill. Collectors care deeply about which scale system a tool was calibrated for.
+Photography: tool photography on warm white — the measuring face, scale markings, and any engraved manufacturer text forward. No props, no staging.
+Region provenance tag: small pill showing timber region — Pacific Northwest, Appalachian, Scandinavian, British Columbia — in green at 10% opacity fill with full green text
+
+
+5. INTERACTION PRINCIPLES
+
+Transitions: 200–240ms ease-in-out — deliberate and grounded, like a diameter tape pulled taut around a trunk
+Selected state: green left-border (3px) + faint #F0F7F1 background tint on active cards
+Empty states: NO TOOLS IN THIS KIT YET. in JetBrains Mono, centered, muted warm grey — one line
+Loading: a thin green progress bar at screen top — no spinner, clean and immediate
+Navigation: bottom tab bar — four tabs: Kit, Region Map, Logbook, Settings. Active tab in green.
+Scale system filter: a first-class filter chip row — Doyle, Scribner, International 1/4", Hoppus, Biltmore — because log scale system is the primary technical differentiator between instruments and the first thing a serious collector asks about
+
+Important: The tree cross-section SVG on each card is the identity mark of this app in the series — the growth ring is immediately legible as a forestry symbol without being literal or decorative. Green rings signal a working instrument; gold rings signal a display piece. This grammar should read within the first session without any explanation needed.
