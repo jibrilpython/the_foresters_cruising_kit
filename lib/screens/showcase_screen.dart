@@ -1,34 +1,41 @@
 import 'dart:math' as math;
-import 'package:flutter/scheduler.dart';
+import 'dart:ui' as ui;
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import 'package:the_foresters_cruising_kit/enum/my_enums.dart';
 import 'package:the_foresters_cruising_kit/models/project_model.dart';
 import 'package:the_foresters_cruising_kit/providers/image_provider.dart';
 import 'package:the_foresters_cruising_kit/providers/project_provider.dart';
 import 'package:the_foresters_cruising_kit/utils/const.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-// ─── Physics node ─────────────────────────────────────────────────────────────
-class _RingNode {
-  final ToolType type;
-  final int count;
-  double x, y, vx, vy;
-  double radius;
-  double targetX, targetY;
+// Requested specific aesthetic colors for the Dendrochronology Core
+const Color kHeartwoodRed = Color(0xFF5C2C16);
+const Color kAgedBrass = Color(0xFFC5A059);
+const Color kRawSteel = Color(0xFF54565B);
+const Color kCanvasKhaki = Color(0xFFD3C5A3);
 
-  _RingNode({
-    required this.type,
-    required this.count,
-    required this.x,
-    required this.y,
-    required this.radius,
-  })  : vx = (math.Random().nextDouble() - 0.5) * 0.5,
-        vy = (math.Random().nextDouble() - 0.5) * 0.5,
-        targetX = x,
-        targetY = y;
+class _ItemNode {
+  ForestryInstrumentModel item;
+  final double angle; // resting angle on the log
+  final double baseRadius; // resting radius (growth ring)
+  
+  double currentRadius;
+  
+  // Dragging state
+  bool isDragging = false;
+  Offset? dragOffset;
+  
+  _ItemNode({
+    required this.item,
+    required this.angle,
+    required this.baseRadius,
+  }) : currentRadius = baseRadius;
 }
 
 class ShowcaseScreen extends ConsumerStatefulWidget {
@@ -37,446 +44,592 @@ class ShowcaseScreen extends ConsumerStatefulWidget {
   ConsumerState<ShowcaseScreen> createState() => _ShowcaseScreenState();
 }
 
-class _ShowcaseScreenState extends ConsumerState<ShowcaseScreen>
-    with SingleTickerProviderStateMixin {
-  late Ticker _ticker;
-  List<_RingNode> _nodes = [];
-  _RingNode? _focusedNode;
-  // focused items derived live from entries on demand
-  Offset? _dragOffset;
+class _ShowcaseScreenState extends ConsumerState<ShowcaseScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _physicsController;
+  
+  List<_ItemNode> _nodes = [];
+  _ItemNode? _focusedNode;
+  
+  double _logRotation = 0.0;
+  double _angularVelocity = 0.0;
+  
+  double _lastHapticRotation = 0.0;
+  
+  double _blurSigma = 0.0;
+  
   int _lastVersion = -1;
+  Offset? _lastDragOffset;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_tick)..start();
+    // Use an animation controller to drive the physics tick indefinitely
+    _physicsController = AnimationController(vsync: this, duration: const Duration(days: 365))
+      ..addListener(_tick);
+    _physicsController.forward();
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _physicsController.dispose();
     super.dispose();
   }
 
-  void _tick(Duration elapsed) {
+  void _tick() {
     final entries = ref.read(projectProvider).entries;
     final version = ref.read(projectProvider).stateVersion;
     if (version != _lastVersion) {
       _lastVersion = version;
       _rebuildNodes(entries);
     }
+    
     if (!mounted) return;
-    setState(() => _updatePhysics());
+    
+    setState(() {
+      // 1. High friction for log rotation
+      if (_angularVelocity.abs() > 0.0) {
+        _logRotation += _angularVelocity;
+        
+        // Haptic detent feedback based on distance rotated
+        if ((_logRotation - _lastHapticRotation).abs() > 0.15) {
+          HapticFeedback.selectionClick();
+          _lastHapticRotation = _logRotation;
+        }
+
+        _angularVelocity *= 0.94; // high friction
+        if (_angularVelocity.abs() < 0.001) {
+          _angularVelocity = 0.0;
+        }
+      }
+      
+      // 2. Centrifugal force pushes nodes outward
+      double speed = _angularVelocity.abs();
+      double centrifugalPush = speed * 1500.0; // scales to velocity
+      
+      for (var node in _nodes) {
+        if (node.isDragging || node == _focusedNode) continue;
+        
+        double targetRadius = node.baseRadius + centrifugalPush;
+        
+        if (targetRadius > node.currentRadius) {
+          // Push outward quickly due to centrifugal force
+          node.currentRadius += (targetRadius - node.currentRadius) * 0.3;
+        } else {
+          // Slide heavily back with low-frequency friction
+          node.currentRadius += (node.baseRadius - node.currentRadius) * 0.08;
+        }
+      }
+      
+      // 3. Blur animation transition
+      double targetBlur = _focusedNode != null ? 8.0 : 0.0;
+      _blurSigma += (targetBlur - _blurSigma) * 0.15;
+    });
   }
 
   void _rebuildNodes(List<ForestryInstrumentModel> entries) {
-    final counts = <ToolType, int>{};
-    for (final e in entries) {
-      counts[e.toolType] = (counts[e.toolType] ?? 0) + 1;
-    }
-    if (counts.isEmpty) { _nodes = []; return; }
-
+    if (entries.isEmpty) { _nodes = []; return; }
+    
     final rng = math.Random(42);
-    final cx = 195.0;
-    final cy = 400.0;
-    final existing = {for (final n in _nodes) n.type: n};
-
-    _nodes = counts.entries.map((kv) {
-      final r = 28.0 + kv.value * 12.0;
-      final ex = existing[kv.key];
-      return _RingNode(
-        type: kv.key,
-        count: kv.value,
-        x: ex?.x ?? (cx + (rng.nextDouble() - 0.5) * 200),
-        y: ex?.y ?? (cy + (rng.nextDouble() - 0.5) * 200),
-        radius: r.clamp(28.0, 72.0),
+    final existing = {for (final n in _nodes) n.item.id: n};
+    
+    _nodes = entries.asMap().entries.map((kv) {
+      final index = kv.key;
+      final e = kv.value;
+      
+      final ex = existing[e.id];
+      if (ex != null) {
+        ex.item = e; // Sync latest state
+        return ex;
+      }
+      
+      // Distribute nodes organically along growth rings outward from the pith
+      double angle = rng.nextDouble() * 2 * math.pi;
+      double radius = 90.0 + (index * 35.0 % 220.0) + (rng.nextDouble() * 25);
+      
+      return _ItemNode(
+        item: e,
+        angle: angle,
+        baseRadius: radius,
       );
     }).toList();
 
-    // If focused node no longer exists, clear focus
-    if (_focusedNode != null) {
-      final match = _nodes.where((n) => n.type == _focusedNode!.type);
-      _focusedNode = match.isEmpty ? null : match.first;
+    if (_focusedNode != null && !entries.any((e) => e.id == _focusedNode!.item.id)) {
+      _focusedNode = null;
     }
   }
 
-  void _updatePhysics() {
-    if (_nodes.isEmpty) return;
-    final size = Size(390.w, 844.h);
-    const friction = 0.92;
-    const attract = 0.018;
-    const repulse = 2200.0;
-    const bounce = 0.45;
+  // --- Log Gestures ---
 
-    final cx = size.width / 2;
-    final cy = _focusedNode == null ? size.height * 0.42 : size.height * 0.28;
-
-    for (int i = 0; i < _nodes.length; i++) {
-      final n = _nodes[i];
-      if (_dragOffset != null && n == _focusedNode) continue;
-
-      // Gravity toward centre
-      n.vx += (cx - n.x) * attract;
-      n.vy += (cy - n.y) * attract;
-
-      // Node–node repulsion
-      for (int j = i + 1; j < _nodes.length; j++) {
-        final o = _nodes[j];
-        final dx = n.x - o.x;
-        final dy = n.y - o.y;
-        final dist2 = dx * dx + dy * dy + 0.1;
-        final minDist = n.radius + o.radius + 12;
-        if (dist2 < minDist * minDist) {
-          final f = repulse / dist2;
-          n.vx += dx * f;
-          n.vy += dy * f;
-          o.vx -= dx * f;
-          o.vy -= dy * f;
-        }
-      }
-
-      n.vx *= friction;
-      n.vy *= friction;
-      n.x += n.vx;
-      n.y += n.vy;
-
-      // Wall bounce
-      if (n.x - n.radius < 0) { n.x = n.radius; n.vx = n.vx.abs() * bounce; }
-      if (n.x + n.radius > size.width) { n.x = size.width - n.radius; n.vx = -n.vx.abs() * bounce; }
-      if (n.y - n.radius < 80) { n.y = 80 + n.radius; n.vy = n.vy.abs() * bounce; }
-      if (n.y + n.radius > size.height * 0.72) { n.y = size.height * 0.72 - n.radius; n.vy = -n.vy.abs() * bounce; }
-    }
+  void _onPanStart(DragStartDetails details) {
+    if (_focusedNode != null) return;
+    final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
+    _lastDragOffset = details.localPosition - center;
+    _angularVelocity = 0.0; // Stop immediately upon touch
   }
 
-  void _onTapNode(_RingNode node) {
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (_focusedNode != null) return;
+    
+    final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
+    final offset = details.localPosition - center;
+    final delta = details.delta;
+    
+    double crossProduct = offset.dx * delta.dy - offset.dy * delta.dx;
+    double dTheta = crossProduct / (offset.distanceSquared + 1.0);
+    
     setState(() {
-      if (_focusedNode?.type == node.type) {
-        _focusedNode = null;
-      } else {
+      _logRotation += dTheta;
+      _lastDragOffset = offset;
+      
+      // Haptic grinding as it turns manually
+      if ((_logRotation - _lastHapticRotation).abs() > 0.1) {
+        HapticFeedback.selectionClick();
+        _lastHapticRotation = _logRotation;
+      }
+    });
+  }
+
+  void _onPanEnd(DragEndDetails details) {
+    if (_focusedNode != null) return;
+    
+    if (_lastDragOffset != null) {
+      final offset = _lastDragOffset!;
+      final vel = details.velocity.pixelsPerSecond;
+      double crossProduct = offset.dx * vel.dy - offset.dy * vel.dx;
+      double angularVelSec = crossProduct / (offset.distanceSquared + 1.0);
+      
+      setState(() {
+        _angularVelocity = angularVelSec / 60.0; // Convert to rad per frame
+      });
+    }
+  }
+
+  // --- Node Gestures ---
+
+  void _onNodePanStart(_ItemNode node, DragStartDetails details) {
+    if (_focusedNode != null) return;
+    setState(() {
+      node.isDragging = true;
+      node.dragOffset = details.globalPosition;
+    });
+    HapticFeedback.heavyImpact(); // Deep thud picking it up
+  }
+
+  void _onNodePanUpdate(_ItemNode node, DragUpdateDetails details) {
+    if (!node.isDragging) return;
+    setState(() {
+      node.dragOffset = details.globalPosition;
+    });
+  }
+
+  void _onNodePanEnd(_ItemNode node, DragEndDetails details) {
+    if (!node.isDragging) return;
+    
+    final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
+    final distanceToCenter = (node.dragOffset! - center).distance;
+    
+    setState(() {
+      node.isDragging = false;
+      if (distanceToCenter < 70.0) {
+        // Locked into center (pith)
         _focusedNode = node;
+        HapticFeedback.heavyImpact(); // Loud CRUNCH haptic snap
+      } else {
+        node.dragOffset = null;
+        HapticFeedback.mediumImpact(); // Dropped back down
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final entries = ref.watch(projectProvider).entries;
     final imageProv = ref.watch(imageProvider);
+    final size = MediaQuery.of(context).size;
+    final center = Offset(size.width / 2, size.height / 2);
 
     return Scaffold(
-      backgroundColor: kBackground,
+      backgroundColor: const Color(0xFFC7A27C), // Base wood color behind blur
       body: Stack(
         children: [
-          // ── Canvas background (growth ring field) ──────────────────────
+          // ── The massive high-friction timber log ──
           Positioned.fill(
-            child: CustomPaint(painter: _ForestFloorPainter()),
-          ),
-
-          // ── Header ─────────────────────────────────────────────────────
-          Positioned(
-            top: 0, left: 0, right: 0,
-            child: SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(24.w, 16.h, 24.w, 0),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('FOREST STAND',
-                      style: GoogleFonts.jetBrainsMono(
-                          color: kAccent, fontSize: 9.sp, fontWeight: FontWeight.w700, letterSpacing: 2.0)),
-                  SizedBox(height: 2.h),
-                  Text('Tool Type Distribution',
-                      style: GoogleFonts.sora(
-                          color: kPrimaryText, fontSize: 22.sp, fontWeight: FontWeight.w700)),
-                ]),
-              ),
-            ),
-          ),
-
-          // ── Physics canvas ─────────────────────────────────────────────
-          entries.isEmpty
-              ? _buildEmptyState()
-              : GestureDetector(
-                  onPanUpdate: (d) {
-                    if (_focusedNode != null) {
-                      setState(() {
-                        _focusedNode!.x += d.delta.dx;
-                        _focusedNode!.y += d.delta.dy;
-                        _focusedNode!.vx = d.delta.dx;
-                        _focusedNode!.vy = d.delta.dy;
-                      });
-                    }
-                  },
-                  child: CustomPaint(
-                    size: Size(double.infinity, double.infinity),
-                    painter: _NodesPainter(nodes: _nodes, focusedNode: _focusedNode),
-                    child: Stack(
-                      children: _nodes.map((n) => _buildNodeWidget(n)).toList(),
+            child: GestureDetector(
+              onPanStart: _onPanStart,
+              onPanUpdate: _onPanUpdate,
+              onPanEnd: _onPanEnd,
+              child: ClipRect(
+                child: ImageFiltered(
+                  // Safe minimum sigma to avoid rendering assertions
+                  imageFilter: ui.ImageFilter.blur(sigmaX: math.max(0.001, _blurSigma), sigmaY: math.max(0.001, _blurSigma)),
+                  child: Transform.rotate(
+                    angle: _logRotation,
+                    child: CustomPaint(
+                      size: size,
+                      painter: _TimberLogPainter(),
                     ),
                   ),
                 ),
-
-          // ── Focused panel ──────────────────────────────────────────────
+              ),
+            ),
+          ),
+          
+          // ── Instrument Nodes ──
+          ..._nodes.map((n) => _buildNodeWidget(n, center)),
+          
+          // ── Empty State ──
+          if (_nodes.isEmpty)
+            Center(
+              child: IgnorePointer(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.park_outlined, size: 64.sp, color: kHeartwoodRed.withAlpha(100)),
+                    SizedBox(height: 16.h),
+                    Text('NO INSTRUMENTS LOGGED',
+                      style: GoogleFonts.jetBrainsMono(
+                        color: kHeartwoodRed.withAlpha(200), 
+                        fontSize: 14.sp, 
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.5,
+                      )
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          
+          // ── Header (fades out when focused) ──
+          if (_focusedNode == null && _nodes.isNotEmpty)
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: SafeArea(
+                child: IgnorePointer(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(24.w, 16.h, 24.w, 0),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('DENDROCHRONOLOGY CORE',
+                          style: GoogleFonts.jetBrainsMono(
+                              color: kHeartwoodRed, fontSize: 10.sp, fontWeight: FontWeight.w800, letterSpacing: 2.5)),
+                      SizedBox(height: 2.h),
+                      Text('Drag to center to focus.',
+                          style: GoogleFonts.sora(
+                              color: kPrimaryText, fontSize: 18.sp, fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+            
+          // ── Focus Panel (Flexible steel/waxed canvas unspool) ──
           if (_focusedNode != null)
             Positioned(
               bottom: 0, left: 0, right: 0,
-              child: _buildFocusPanel(imageProv),
+              child: SafeArea(
+                child: _buildFocusPanel(imageProv),
+              ),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildNodeWidget(_RingNode node) {
-    final isFocused = _focusedNode?.type == node.type;
+  Widget _buildNodeWidget(_ItemNode node, Offset center) {
+    bool isFocused = _focusedNode == node;
+    
+    double x, y;
+    if (isFocused) {
+      x = center.dx;
+      y = center.dy;
+    } else if (node.isDragging && node.dragOffset != null) {
+      x = node.dragOffset!.dx;
+      y = node.dragOffset!.dy;
+    } else {
+      // Position based on log rotation and specific growth ring
+      double finalAngle = node.angle + _logRotation;
+      x = center.dx + math.cos(finalAngle) * node.currentRadius;
+      y = center.dy + math.sin(finalAngle) * node.currentRadius;
+    }
+
+    final double nodeSize = 56.w;
+
     return Positioned(
-      left: node.x - node.radius,
-      top: node.y - node.radius,
+      left: x - nodeSize / 2,
+      top: y - nodeSize / 2,
       child: GestureDetector(
-        onTap: () => _onTapNode(node),
-        child: AnimatedContainer(
+        onPanStart: (d) => _onNodePanStart(node, d),
+        onPanUpdate: (d) => _onNodePanUpdate(node, d),
+        onPanEnd: (d) => _onNodePanEnd(node, d),
+        child: AnimatedScale(
+          scale: isFocused ? 1.25 : (node.isDragging ? 1.15 : 1.0),
           duration: const Duration(milliseconds: 240),
-          width: node.radius * 2,
-          height: node.radius * 2,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isFocused
-                ? getToolTypeColor(node.type)
-                : getToolTypeColor(node.type).withAlpha(220),
-            border: Border.all(
-              color: isFocused ? Colors.white : getToolTypeColor(node.type).withAlpha(80),
-              width: isFocused ? 2.5 : 1.5,
+          curve: Curves.easeOutBack,
+          child: Container(
+            width: nodeSize,
+            height: nodeSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _getToolColor(node.item.toolType),
+              border: Border.all(
+                color: isFocused ? Colors.white : kHeartwoodRed.withAlpha(120),
+                width: isFocused ? 3 : 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(isFocused || node.isDragging ? 100 : 40),
+                  blurRadius: isFocused || node.isDragging ? 16 : 8,
+                  offset: Offset(0, isFocused || node.isDragging ? 8 : 4),
+                ),
+                // Harsh shadows for physical objects
+                BoxShadow(
+                  color: Colors.black.withAlpha(80),
+                  blurRadius: 4,
+                  offset: const Offset(2, 4),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: getToolTypeColor(node.type).withAlpha(isFocused ? 100 : 40),
-                blurRadius: isFocused ? 24 : 8,
+            child: Center(
+              child: Icon(
+                _getToolIcon(node.item.toolType),
+                color: Colors.white,
+                size: 24.sp,
               ),
-            ],
-          ),
-          child: Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(
-                node.count.toString(),
-                style: GoogleFonts.sora(
-                  color: Colors.white,
-                  fontSize: node.radius * 0.52,
-                  fontWeight: FontWeight.w700,
-                  height: 1.1,
-                ),
-              ),
-              if (node.radius > 34.w)
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6.w),
-                  child: Text(
-                    node.type.label,
-                    style: GoogleFonts.inter(
-                      color: Colors.white.withAlpha(200),
-                      fontSize: node.radius * 0.19,
-                      fontWeight: FontWeight.w500,
-                      height: 1.1,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ]),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Color _getToolColor(ToolType type) {
+    switch (type) {
+      case ToolType.clinometer: return kAgedBrass;
+      case ToolType.abneyLevel: return kAgedBrass;
+      case ToolType.diameterTape: return kAgedBrass;
+      case ToolType.biltmoreStick: return kCanvasKhaki;
+      case ToolType.logRule: return kCanvasKhaki;
+      case ToolType.incrementBorer: return kRawSteel;
+      case ToolType.timberScribe: return kRawSteel;
+    }
+  }
+
+  IconData _getToolIcon(ToolType type) {
+    switch (type) {
+      case ToolType.clinometer: return Icons.explore;
+      case ToolType.abneyLevel: return Icons.straighten;
+      case ToolType.diameterTape: return Icons.all_inclusive;
+      case ToolType.biltmoreStick: return Icons.square_foot;
+      case ToolType.logRule: return Icons.linear_scale;
+      case ToolType.incrementBorer: return Icons.build;
+      case ToolType.timberScribe: return Icons.edit;
+    }
   }
 
   Widget _buildFocusPanel(ImageNotifier imageProv) {
-    final node = _focusedNode!;
-    final items = ref.read(projectProvider).entries.where((e) => e.toolType == node.type).toList();
-    return Container(
-      constraints: BoxConstraints(maxHeight: 340.h),
-      decoration: BoxDecoration(
-        color: kPanelBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(kRadiusMedium)),
-        border: const Border(top: BorderSide(color: kOutline, width: 1)),
-        boxShadow: const [kShadowFloat],
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Handle
-        Padding(
-          padding: EdgeInsets.only(top: 12.h),
-          child: Container(
-            width: 36.w, height: 4.h,
-            decoration: BoxDecoration(color: kOutline, borderRadius: BorderRadius.circular(kRadiusPill)),
-          ),
+    final item = _focusedNode!.item;
+    final imagePath = imageProv.getImagePath(item.photoPath);
+    final hasImage = imagePath != null && item.photoPath.isNotEmpty && File(imagePath).existsSync();
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0), // Slides up unspooling
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      builder: (context, val, child) {
+        return Transform.translate(
+          offset: Offset(0, val * 400),
+          child: child,
+        );
+      },
+      child: Container(
+        margin: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+        decoration: BoxDecoration(
+          color: kCanvasKhaki, // Waxed canvas look
+          borderRadius: BorderRadius.circular(kRadiusMedium),
+          border: Border.all(color: kHeartwoodRed, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(120),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
+            )
+          ],
         ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(20.w, 14.h, 20.w, 0),
-          child: Row(children: [
-            Container(
-              width: 8.w, height: 8.w,
-              decoration: BoxDecoration(color: getToolTypeColor(node.type), shape: BoxShape.circle),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // Inner padding and tone shift for realism
+          Container(
+            padding: EdgeInsets.all(16.w),
+            decoration: BoxDecoration(
+              color: kBackground.withAlpha(220),
+              borderRadius: BorderRadius.circular(kRadiusMedium - 2),
             ),
-            SizedBox(width: 10.w),
-            Expanded(
-              child: Text(node.type.label,
-                  style: GoogleFonts.sora(color: kPrimaryText, fontSize: 18.sp, fontWeight: FontWeight.w700)),
-            ),
-            GestureDetector(
-              onTap: () => setState(() { _focusedNode = null; }),
-              child: Container(
-                padding: EdgeInsets.all(8.w),
-                decoration: BoxDecoration(color: kBackground, borderRadius: BorderRadius.circular(kRadiusSubtle), border: Border.all(color: kOutline)),
-                child: Icon(Icons.close, size: 16.sp, color: kPrimaryText),
-              ),
-            ),
-          ]),
-        ),
-        SizedBox(height: 12.h),
-        SizedBox(
-          height: 220.h,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.symmetric(horizontal: 14.w),
-            itemCount: items.length,
-            itemBuilder: (context, idx) {
-              final item = items[idx];
-              final globalIndex = ref.read(projectProvider).entries.indexWhere((e) => e.id == item.id);
-              if (globalIndex == -1) return const SizedBox.shrink();
-              final imagePath = imageProv.getImagePath(item.photoPath);
-              return GestureDetector(
-                onTap: () => Navigator.pushNamed(context, '/info_screen', arguments: {'index': globalIndex}),
-                child: Container(
-                  width: 160.w,
-                  margin: EdgeInsets.symmetric(horizontal: 5.w, vertical: 4.h),
-                  decoration: BoxDecoration(
-                    color: kBackground,
-                    borderRadius: BorderRadius.circular(kRadiusSubtle),
-                    border: Border.all(color: kOutline, width: 1),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(
-                      flex: 3,
-                      child: (imagePath != null && item.photoPath.isNotEmpty && File(imagePath).existsSync())
-                          ? Image.file(File(imagePath), fit: BoxFit.cover, width: double.infinity)
-                          : Container(
-                              color: kBackground,
-                              child: Center(child: Icon(Icons.landscape_outlined, color: kOutline, size: 28.sp)),
-                            ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Padding(
-                        padding: EdgeInsets.all(10.w),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Text(
-                            item.manufacturer.isNotEmpty ? item.manufacturer : 'Unknown',
-                            style: GoogleFonts.sora(color: kPrimaryText, fontSize: 12.sp, fontWeight: FontWeight.w600),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                          SizedBox(height: 3.h),
-                          Text(
-                            item.scaleSystem.label,
-                            style: GoogleFonts.jetBrainsMono(color: kGold, fontSize: 9.sp),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                        ]),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.toolType.label.toUpperCase(),
+                      style: GoogleFonts.sora(
+                        color: kHeartwoodRed,
+                        fontSize: 20.sp,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ]),
+                  ),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _focusedNode = null;
+                      });
+                      HapticFeedback.mediumImpact();
+                    },
+                    child: Container(
+                      padding: EdgeInsets.all(8.w),
+                      decoration: BoxDecoration(
+                        color: kRawSteel.withAlpha(20),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.close, color: kHeartwoodRed, size: 20.sp),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16.h),
+              if (hasImage)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(kRadiusSubtle),
+                  child: Image.file(
+                    File(imagePath),
+                    width: double.infinity,
+                    height: 180.h,
+                    fit: BoxFit.cover,
+                  ),
                 ),
-              );
-            },
+              if (hasImage) SizedBox(height: 16.h),
+              
+              // Metadata styled like an engraved diameter tape
+              Container(
+                padding: EdgeInsets.symmetric(vertical: 12.h, horizontal: 8.w),
+                decoration: BoxDecoration(
+                  color: kAgedBrass.withAlpha(40),
+                  border: Border.all(color: kAgedBrass, width: 1.5),
+                  borderRadius: BorderRadius.circular(kRadiusSubtle),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Expanded(child: _buildStatCol('SCALE', item.scaleSystem.label)),
+                    Container(width: 1.5, height: 32.h, color: kAgedBrass),
+                    Expanded(child: _buildStatCol('ERA', item.eraOfProduction)),
+                    Container(width: 1.5, height: 32.h, color: kAgedBrass),
+                    Expanded(child: _buildStatCol('ORIGIN', item.countryOfOrigin)),
+                  ],
+                ),
+              ),
+              
+              SizedBox(height: 16.h),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kHeartwoodRed,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: EdgeInsets.symmetric(vertical: 14.h),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSubtle)),
+                  ),
+                  onPressed: () {
+                    final globalIndex = ref.read(projectProvider).entries.indexWhere((e) => e.id == item.id);
+                    if (globalIndex != -1) {
+                      Navigator.pushNamed(context, '/info_screen', arguments: {'index': globalIndex});
+                    }
+                  },
+                  child: Text('INSPECT INSTRUMENT', style: GoogleFonts.sora(fontSize: 14.sp, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ]),
           ),
-        ),
-        SizedBox(height: 12.h),
-      ]),
+        ]),
+      ),
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        CustomPaint(size: Size(80.w, 80.w), painter: _EmptyRingsPainter()),
-        SizedBox(height: 24.h),
-        Text('NO INSTRUMENTS IN THE STAND YET.',
-            style: GoogleFonts.jetBrainsMono(
-                color: kSecondaryText, fontSize: 11.sp, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-        SizedBox(height: 8.h),
-        Text('Log instruments to see them appear here.',
-            style: GoogleFonts.inter(color: kSecondaryText.withAlpha(140), fontSize: 13.sp)),
-      ]),
+  Widget _buildStatCol(String label, String value) {
+    return Column(
+      children: [
+        Text(label, style: GoogleFonts.jetBrainsMono(color: kHeartwoodRed.withAlpha(180), fontSize: 9.sp, fontWeight: FontWeight.w700, letterSpacing: 1.0)),
+        SizedBox(height: 4.h),
+        Text(value.isNotEmpty ? value : '--', style: GoogleFonts.sora(color: kPrimaryText, fontSize: 12.sp, fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+      ],
     );
   }
 }
 
-// ─── Forest floor background painter (faint growth rings) ────────────────────
-class _ForestFloorPainter extends CustomPainter {
+// ── Procedural vector rendering of tree rings ──
+class _TimberLogPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = kOutline.withAlpha(60)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8;
-
-    // Three scattered ring clusters
-    final centers = [
-      Offset(size.width * 0.15, size.height * 0.1),
-      Offset(size.width * 0.9, size.height * 0.08),
-      Offset(size.width * 0.5, size.height * 0.85),
-    ];
-    for (final c in centers) {
-      for (int i = 1; i <= 5; i++) {
-        canvas.drawCircle(c, i * 32.0, paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
-}
-
-// ─── Nodes painter (shadows between nodes) ────────────────────────────────────
-class _NodesPainter extends CustomPainter {
-  final List<_RingNode> nodes;
-  final _RingNode? focusedNode;
-
-  const _NodesPainter({required this.nodes, required this.focusedNode});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Draw connecting lines between overlapping nodes (subtle)
-    final linePaint = Paint()
-      ..color = kOutline.withAlpha(60)
-      ..strokeWidth = 0.8;
-    for (int i = 0; i < nodes.length; i++) {
-      for (int j = i + 1; j < nodes.length; j++) {
-        final dx = nodes[i].x - nodes[j].x;
-        final dy = nodes[i].y - nodes[j].y;
-        final dist = math.sqrt(dx * dx + dy * dy);
-        if (dist < 180) {
-          canvas.drawLine(Offset(nodes[i].x, nodes[i].y), Offset(nodes[j].x, nodes[j].y), linePaint);
+    final center = Offset(size.width / 2, size.height / 2);
+    // Draw far beyond the screen so corners are never exposed when rotating
+    final radiusMax = math.max(size.width, size.height) * 1.5;
+    
+    // Solid base wood
+    final bgPaint = Paint()..color = const Color(0xFFC7A27C);
+    canvas.drawRect(Rect.fromLTWH(-radiusMax, -radiusMax, radiusMax * 3, radiusMax * 3), bgPaint);
+    
+    // Rings
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke;
+      
+    final rng = math.Random(12345);
+    
+    // Number of rings to draw
+    int numRings = (radiusMax / 15.0).ceil();
+    
+    for (int i = 1; i <= numRings; i++) {
+      ringPaint.strokeWidth = 1.0 + rng.nextDouble() * 1.5;
+      ringPaint.color = kHeartwoodRed.withAlpha(15 + rng.nextInt(35));
+      
+      double r = i * 15.0;
+      
+      Path path = Path();
+      for (int a = 0; a <= 360; a += 5) {
+        double rad = a * math.pi / 180;
+        // Perturbation to simulate organic wood grain
+        double noise = math.sin(rad * 3) * 2.5 + math.cos(rad * 5) * 1.5 + math.sin(rad * 11) * 0.5;
+        double radiusOffset = noise * (i / 10.0); // Rings get wobblier further out
+        
+        double x = center.dx + math.cos(rad) * (r + radiusOffset);
+        double y = center.dy + math.sin(rad) * (r + radiusOffset);
+        
+        if (a == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
         }
       }
+      path.close();
+      canvas.drawPath(path, ringPaint);
     }
-  }
-
-  @override
-  bool shouldRepaint(covariant _NodesPainter old) => true;
-}
-
-// ─── Empty state rings painter ────────────────────────────────────────────────
-class _EmptyRingsPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final paint = Paint()
-      ..color = kOutline
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    for (int i = 1; i <= 4; i++) {
-      canvas.drawCircle(Offset(cx, cy), size.width / 2 * (i / 4), paint);
-    }
-    canvas.drawCircle(Offset(cx, cy), 3, Paint()..color = kSecondaryText.withAlpha(80));
+    
+    // Pith (The very center of the log)
+    final pithPaint = Paint()
+      ..color = kHeartwoodRed.withAlpha(200)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 10, pithPaint);
+    canvas.drawCircle(center, 30, Paint()..color = kHeartwoodRed.withAlpha(30)..style=PaintingStyle.fill);
+    
+    // Dark radial gradient around the pith to draw the eye to the center
+    final gradientPaint = Paint()
+      ..shader = ui.Gradient.radial(
+        center, 
+        100, 
+        [kHeartwoodRed.withAlpha(80), Colors.transparent],
+        [0.0, 1.0]
+      );
+    canvas.drawCircle(center, 100, gradientPaint);
   }
 
   @override
