@@ -18,9 +18,7 @@ class InitialScreen extends ConsumerWidget {
         children: [
           // ── Tree cross-section backdrop ──────────────────────────────────
           Positioned.fill(
-            child: CustomPaint(
-              painter: _TreeRingBackdropPainter(),
-            ),
+            child: CustomPaint(painter: _TreeRingBackdropPainter()),
           ),
 
           SafeArea(
@@ -30,27 +28,47 @@ class InitialScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Mono logotype ───────────────────────────────────────
+                  // ── Technical Header ──────────────────────────────────────
                   Row(
                     children: [
-                      Text(
-                        'TFCK.',
-                        style: GoogleFonts.jetBrainsMono(
-                          fontSize: 13.sp,
-                          color: kAccent,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 2.0,
-                        ),
+                      Icon(
+                        Icons.inventory_2_outlined,
+                        color: kAccent,
+                        size: 18.sp,
                       ),
                       SizedBox(width: 12.w),
+                      Text(
+                        'DIGITAL FIELD ARCHIVE',
+                        style: GoogleFonts.jetBrainsMono(
+                          fontSize: 11.sp,
+                          color: kAccent,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const Spacer(),
                       Container(
-                        height: 1,
-                        width: 48.w,
-                        color: kAccent.withAlpha(80),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 8.w,
+                          vertical: 4.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: kAccent.withAlpha(20),
+                          borderRadius: BorderRadius.circular(4.r),
+                        ),
+                        child: Text(
+                          'INDEXED',
+                          style: GoogleFonts.jetBrainsMono(
+                            fontSize: 8.sp,
+                            color: kAccent,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ],
                   ),
 
+                  SizedBox(height: 40.h),
                   // ── Hero typography ─────────────────────────────────────
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -65,13 +83,17 @@ class InitialScreen extends ConsumerWidget {
                           letterSpacing: -1.5,
                         ),
                       ),
-                      SizedBox(height: 28.h),
-                      Container(
-                        width: 48.w,
-                        height: 2.h,
-                        color: kAccent,
+                      SizedBox(height: 24.h),
+                      Text(
+                        'PRECISION FORESTRY INSTRUMENTS',
+                        style: GoogleFonts.jetBrainsMono(
+                          color: kGold,
+                          fontSize: 10.sp,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                        ),
                       ),
-                      SizedBox(height: 20.h),
+                      SizedBox(height: 12.h),
                       Text(
                         'A digital archive of the manual instruments that measured the great woods — from brass Abney levels to cast-iron log scaling rules.',
                         style: GoogleFonts.inter(
@@ -86,33 +108,39 @@ class InitialScreen extends ConsumerWidget {
                       Wrap(
                         spacing: 8.w,
                         runSpacing: 6.h,
-                        children: [
-                          'Doyle',
-                          'Scribner',
-                          'International 1/4"',
-                          'Hoppus',
-                        ]
-                            .map((s) => Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 10.w,
-                                    vertical: 4.h,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    border:
-                                        Border.all(color: kOutline, width: 1),
-                                    borderRadius:
-                                        BorderRadius.circular(kRadiusPill),
-                                  ),
-                                  child: Text(
-                                    s,
-                                    style: GoogleFonts.jetBrainsMono(
-                                      color: kSecondaryText,
-                                      fontSize: 10.sp,
-                                      fontWeight: FontWeight.w500,
+                        children:
+                            [
+                                  'Doyle',
+                                  'Scribner',
+                                  'International 1/4"',
+                                  'Hoppus',
+                                ]
+                                .map(
+                                  (s) => Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 10.w,
+                                      vertical: 4.h,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: kOutline,
+                                        width: 1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                        kRadiusPill,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      s,
+                                      style: GoogleFonts.jetBrainsMono(
+                                        color: kSecondaryText,
+                                        fontSize: 10.sp,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
-                                ))
-                            .toList(),
+                                )
+                                .toList(),
                       ),
                     ],
                   ),
@@ -192,10 +220,7 @@ class _TreeRingBackdropPainter extends CustomPainter {
       final angle = i * math.pi / 6;
       canvas.drawLine(
         Offset(cx, cy),
-        Offset(
-          cx + 430 * math.cos(angle),
-          cy + 430 * math.sin(angle),
-        ),
+        Offset(cx + 430 * math.cos(angle), cy + 430 * math.sin(angle)),
         rayPaint,
       );
     }

@@ -18,13 +18,32 @@ dependencies:
   image_picker: ^1.1.2
   path_provider: ^2.1.5
   uuid: ^4.5.1
+  flutter_staggered_grid_view: ^0.7.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/icon.png"
+  adaptive_icon_background: "#F4F3EF"
+  adaptive_icon_foreground: "assets/images/icon.png"
+
+flutter_native_splash:
+  color: "#F4F3EF"
+  image: "assets/images/logo.png"
+  android: true
+  ios: true
+  android_12:
+    image: "assets/images/logo.png"
+    color: "#F4F3EF"

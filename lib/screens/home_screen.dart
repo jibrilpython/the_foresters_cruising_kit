@@ -11,6 +11,7 @@ import 'package:the_foresters_cruising_kit/providers/search_provider.dart';
 import 'package:the_foresters_cruising_kit/providers/input_provider.dart';
 import 'package:the_foresters_cruising_kit/utils/const.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -45,7 +46,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final filteredByScale = _selectedScaleFilter == null
         ? allEntries
-        : allEntries.where((e) => e.scaleSystem == _selectedScaleFilter).toList();
+        : allEntries
+              .where((e) => e.scaleSystem == _selectedScaleFilter)
+              .toList();
     final entries = searchProv.filteredList(filteredByScale);
 
     return Scaffold(
@@ -75,18 +78,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ? SliverToBoxAdapter(child: _buildEmptyState())
               : SliverPadding(
                   padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 140.h),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final entry = entries[index];
-                        final mainIndex = ref
-                            .read(projectProvider)
-                            .entries
-                            .indexWhere((e) => e.id == entry.id);
-                        return _buildInstrumentCard(context, entry, mainIndex);
-                      },
-                      childCount: entries.length,
-                    ),
+                  sliver: SliverMasonryGrid.count(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 12.w,
+                    crossAxisSpacing: 12.w,
+                    itemBuilder: (context, index) {
+                      final entry = entries[index];
+                      final mainIndex = ref
+                          .read(projectProvider)
+                          .entries
+                          .indexWhere((e) => e.id == entry.id);
+                      return _buildInstrumentCard(context, entry, mainIndex);
+                    },
+                    childCount: entries.length,
                   ),
                 ),
         ],
@@ -130,7 +134,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildAppBar(int count) {
     return SliverAppBar(
-      expandedHeight: 160.h,
+      expandedHeight: 120.h,
       stretch: true,
       pinned: true,
       backgroundColor: kBackground,
@@ -173,7 +177,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   SizedBox(width: 12.w),
                   Container(
                     padding: EdgeInsets.symmetric(
-                        horizontal: 10.w, vertical: 4.h),
+                      horizontal: 10.w,
+                      vertical: 4.h,
+                    ),
                     decoration: BoxDecoration(
                       color: kPrimaryText,
                       borderRadius: BorderRadius.circular(kRadiusSubtle),
@@ -254,8 +260,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               },
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14.w),
-                child:
-                    Icon(Icons.close, color: kSecondaryText, size: 16.sp),
+                child: Icon(Icons.close, color: kSecondaryText, size: 16.sp),
               ),
             ),
         ],
@@ -315,7 +320,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ) {
     final imageProv = ref.watch(imageProvider);
     final imagePath = imageProv.getImagePath(entry.photoPath);
-    final isOperational = entry.conditionGrade == ConditionGrade.operational ||
+    final isOperational =
+        entry.conditionGrade == ConditionGrade.operational ||
         entry.conditionGrade == ConditionGrade.museumQuality;
     final ringColor = isOperational ? kAccent : kGold;
 
@@ -326,54 +332,91 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         arguments: {'index': index},
       ),
       child: Container(
-        margin: EdgeInsets.only(bottom: 12.h),
-        padding: EdgeInsets.all(14.w),
         decoration: BoxDecoration(
           color: kPanelBg,
           borderRadius: BorderRadius.circular(kRadiusSubtle),
           border: Border.all(color: kOutline, width: 1),
           boxShadow: const [kShadowSubtle],
         ),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left: thumbnail or tree cross-section SVG
-            ClipRRect(
-              borderRadius: BorderRadius.circular(kRadiusSubtle - 2),
-              child: SizedBox(
-                width: 72.w,
-                height: 72.w,
-                child: (entry.photoPath.isNotEmpty &&
-                        imagePath != null &&
-                        File(imagePath).existsSync())
-                    ? Image.file(File(imagePath), fit: BoxFit.cover)
-                    : Container(
-                        color: kBackground,
-                        child: Center(
-                          child: CustomPaint(
-                            size: Size(48.w, 48.w),
-                            painter:
-                                _TreeRingMiniPainter(ringColor: ringColor),
+            // Top: Image or Tree Ring with Condition Indicator
+            Stack(
+              children: [
+                AspectRatio(
+                  aspectRatio: 1.1,
+                  child: (entry.photoPath.isNotEmpty &&
+                          imagePath != null &&
+                          File(imagePath).existsSync())
+                      ? Image.file(File(imagePath), fit: BoxFit.cover)
+                      : Container(
+                          color: kBackground,
+                          child: Center(
+                            child: CustomPaint(
+                              size: Size(56.w, 56.w),
+                              painter: _TreeRingMiniPainter(ringColor: ringColor),
+                            ),
                           ),
                         ),
+                ),
+                Positioned(
+                  top: 10.w,
+                  right: 10.w,
+                  child: Container(
+                    width: 8.w,
+                    height: 8.w,
+                    decoration: BoxDecoration(
+                      color: getConditionColor(entry.conditionGrade),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(20),
+                          blurRadius: 4,
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+                if (entry.eraOfProduction.isNotEmpty)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(vertical: 4.h, horizontal: 8.w),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black.withAlpha(100), Colors.transparent],
+                        ),
                       ),
-              ),
+                      child: Text(
+                        entry.eraOfProduction,
+                        style: GoogleFonts.jetBrainsMono(
+                          color: Colors.white,
+                          fontSize: 8.sp,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            SizedBox(width: 14.w),
 
-            // Right: content
-            Expanded(
+            // Content
+            Padding(
+              padding: EdgeInsets.all(12.w),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Identifier in mono
                   Text(
-                    entry.cruiserIdentifier.isNotEmpty
-                        ? entry.cruiserIdentifier
-                        : 'NO-ID',
+                    entry.cruiserIdentifier.isNotEmpty ? entry.cruiserIdentifier : 'NO-ID',
                     style: GoogleFonts.jetBrainsMono(
                       color: kAccent,
-                      fontSize: 9.sp,
+                      fontSize: 8.sp,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
                     ),
@@ -381,114 +424,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 4.h),
-
-                  // Manufacturer (Sora — display size)
                   Text(
-                    entry.manufacturer.isNotEmpty
-                        ? entry.manufacturer
-                        : 'Unknown Maker',
+                    entry.manufacturer.isNotEmpty ? entry.manufacturer : 'Unknown Maker',
                     style: GoogleFonts.sora(
                       color: kPrimaryText,
-                      fontSize: 16.sp,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.w700,
                       height: 1.2,
                     ),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 6.h),
-
-                  // Tool type tag
                   Text(
                     entry.toolType.label,
                     style: GoogleFonts.inter(
                       color: kSecondaryText,
-                      fontSize: 12.sp,
+                      fontSize: 11.sp,
                       fontWeight: FontWeight.w400,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 8.h),
-
-                  // Bottom row: scale system badge + region tag
-                  Row(
+                  SizedBox(height: 10.h),
+                  Wrap(
+                    spacing: 4.w,
+                    runSpacing: 4.h,
                     children: [
-                      // Scale system badge — gold pill in JetBrains Mono
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: 8.w, vertical: 3.h),
-                        decoration: BoxDecoration(
-                          color: kGoldSurface,
-                          borderRadius: BorderRadius.circular(kRadiusPill),
-                          border: Border.all(
-                              color: kGold.withAlpha(80), width: 1),
-                        ),
-                        child: Text(
-                          entry.scaleSystem.label,
-                          style: GoogleFonts.jetBrainsMono(
-                            color: kGold,
-                            fontSize: 9.sp,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 6.w),
-                      // Region provenance tag — green pill
+                      _badge(entry.scaleSystem.label, kGold, kGoldSurface),
                       if (entry.timberRegion != TimberRegion.other)
-                        Flexible(
-                          child: Container(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 8.w, vertical: 3.h),
-                            decoration: BoxDecoration(
-                              color: kAccent.withAlpha(25),
-                              borderRadius:
-                                  BorderRadius.circular(kRadiusPill),
-                            ),
-                            child: Text(
-                              entry.timberRegion.label,
-                              style: GoogleFonts.inter(
-                                color: kAccent,
-                                fontSize: 10.sp,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
+                        _badge(entry.timberRegion.label, kAccent, kAccent.withAlpha(25)),
                     ],
                   ),
                 ],
               ),
             ),
-
-            // Right edge: era + condition dot
-            Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  width: 8.w,
-                  height: 8.w,
-                  decoration: BoxDecoration(
-                    color: getConditionColor(entry.conditionGrade),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                SizedBox(height: 32.h),
-                if (entry.eraOfProduction.isNotEmpty)
-                  Text(
-                    entry.eraOfProduction,
-                    style: GoogleFonts.jetBrainsMono(
-                      color: kSecondaryText,
-                      fontSize: 10.sp,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-              ],
-            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _badge(String text, Color color, Color bgColor) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(kRadiusPill),
+        border: Border.all(color: color.withAlpha(40), width: 1),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.jetBrainsMono(
+          color: color,
+          fontSize: 8.sp,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -564,11 +552,7 @@ class _TreeRingMiniPainter extends CustomPainter {
       ..strokeWidth = 1.2;
 
     for (int i = 1; i <= rings; i++) {
-      canvas.drawCircle(
-        Offset(cx, cy),
-        maxR * (i / rings),
-        paint,
-      );
+      canvas.drawCircle(Offset(cx, cy), maxR * (i / rings), paint);
     }
 
     // Pith
